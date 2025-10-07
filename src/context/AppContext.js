@@ -1,9 +1,10 @@
 import React, { createContext, useState, useEffect, useContext, useCallback } from "react";
+import { supabase } from "../config/supabase";
 
 export const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  const [user, setUser] = useState(null); // { role, username }
+  const [user, setUser] = useState(null);
   const [events, setEvents] = useState([]);
   const [teams, setTeams] = useState([]);
   const [judges, setJudges] = useState([]);
@@ -11,7 +12,6 @@ export const AppProvider = ({ children }) => {
   const [evaluations, setEvaluations] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Load data from localStorage
   const loadData = useCallback(() => {
     setEvents(
       JSON.parse(localStorage.getItem("events")) || [
@@ -39,7 +39,6 @@ export const AppProvider = ({ children }) => {
     setEvaluations(JSON.parse(localStorage.getItem("evaluations")) || []);
   }, []);
 
-  // Save data to localStorage (memoized so ESLint is happy)
   const saveData = useCallback(() => {
     localStorage.setItem("events", JSON.stringify(events));
     localStorage.setItem("teams", JSON.stringify(teams));
@@ -48,7 +47,6 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem("evaluations", JSON.stringify(evaluations));
   }, [events, teams, judges, categories, evaluations]);
 
-  // Login function
   const login = (userData) => {
     setUser({
       role: "admin",
@@ -58,56 +56,69 @@ export const AppProvider = ({ children }) => {
     });
   };
 
-  // Logout
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     localStorage.removeItem("currentUser");
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
   };
 
-  // Verify token and load user on mount
   useEffect(() => {
-    const verifyToken = async () => {
-      const token = localStorage.getItem("token");
-      const currentUser = localStorage.getItem("currentUser");
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (token && currentUser) {
-        try {
-          const res = await fetch("http://localhost:5000/api/auth/me", {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (profile) {
+          setUser({
+            role: "admin",
+            username: profile.name,
+            email: profile.email,
+            id: profile.id,
           });
-
-          if (res.ok) {
-            const userData = JSON.parse(currentUser);
-            setUser({
-              role: "admin",
-              username: userData.name,
-              email: userData.email,
-              id: userData.id,
-            });
-          } else {
-            // Token is invalid, clear it
-            localStorage.removeItem("token");
-            localStorage.removeItem("currentUser");
-          }
-        } catch (error) {
-          console.error("Token verification failed:", error);
-          localStorage.removeItem("token");
-          localStorage.removeItem("currentUser");
         }
       }
 
       setLoading(false);
     };
 
-    verifyToken();
+    initAuth();
     loadData();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        (async () => {
+          if (event === 'SIGNED_IN' && session?.user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .maybeSingle();
+
+            if (profile) {
+              setUser({
+                role: "admin",
+                username: profile.name,
+                email: profile.email,
+                id: profile.id,
+              });
+            }
+          } else if (event === 'SIGNED_OUT') {
+            setUser(null);
+          }
+        })();
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [loadData]);
 
-  // Save data when state changes
   useEffect(() => {
     saveData();
   }, [saveData]);

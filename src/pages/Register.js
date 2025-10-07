@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { supabase } from "../config/supabase";
 import { useApp } from "../context/AppContext";
 import { validateEmail, validatePassword } from "../utils/authHelpers";
 import { generateCaptcha, drawCaptcha } from "../utils/captcha";
@@ -100,32 +101,38 @@ function Register() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          email: formData.email,
-          password: formData.password
-        })
+      const { data, error } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            name: formData.name,
+          },
+        },
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setErrors({ general: data.msg || "Registration failed" });
+      if (error) {
+        setErrors({ general: error.message || "Registration failed" });
         setLoading(false);
         return;
       }
 
-      // Save token + user info locally
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("currentUser", JSON.stringify(data.user));
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-      // Update context state
-      login(data.user);
-
-      navigate("/admin/events");
+        if (profile) {
+          login({
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+          });
+          navigate("/admin/events");
+        }
+      }
     } catch (error) {
       console.error(error);
       setErrors({ general: "An error occurred. Please try again." });

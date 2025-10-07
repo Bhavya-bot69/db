@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { supabase } from "../config/supabase";
 import { useApp } from "../context/AppContext";
 import { validateEmail } from "../utils/authHelpers";
 import "../styles/Auth.css";
@@ -35,28 +36,33 @@ function Login() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setErrors({ general: data.msg || "Invalid email or password" });
+      if (error) {
+        setErrors({ general: error.message || "Invalid email or password" });
         setLoading(false);
         return;
       }
 
-      // Save token and user
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("currentUser", JSON.stringify(data.user));
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-      // Update context state
-      login(data.user);
-
-      navigate("/admin/events");
+        if (profile) {
+          login({
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+          });
+          navigate("/admin/events");
+        }
+      }
     } catch (error) {
       console.error(error);
       setErrors({ general: "An error occurred. Please try again." });
